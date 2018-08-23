@@ -1,0 +1,11 @@
+[package]
+name = "monome-bela-seq"
+version = "0.1.0"
+authors = ["Paul Adenot <paul@paul.cx>"]
+
+[dependencies]
+monome-rs = "0.1.2"
+audio-clock = "0.2.0"
+
+[dependencies.bela]
+path = "../bela-rs/"

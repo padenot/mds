@@ -2,7 +2,7 @@ extern crate bela;
 extern crate monome;
 extern crate audio_clock;
 use std::{thread, time};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Sender, Receiver};
 
 use bela::*;
 use monome::*;
@@ -17,9 +17,61 @@ enum Message {
 }
 
 struct Renderer {
-    clock: ClockUpdater,
-    idx: usize,
+    clock_up: ClockUpdater,
+    clock_cons: ClockConsumer,
+    receiver: Receiver<Message>,
+    tracks: Vec<TrackControl>,
+    tempo: f32
 }
+
+impl Renderer {
+    fn new(width: usize, height: usize, clock_updater: ClockUpdater, clock_consumer: ClockConsumer, receiver: Receiver<Message>) -> Renderer {
+        let mut tracks = Vec::<TrackControl>::new();
+        for _ in 0..height {
+            let t = TrackControl::new(width);
+            tracks.push(t);
+        }
+        Renderer {
+            receiver,
+            clock_up: clock_updater,
+            clock_cons: clock_consumer,
+            tracks,
+            tempo: 0.
+        }
+    }
+    fn press(&mut self, x: usize, y: usize) {
+       self.tracks[y].press(x);
+    }
+    fn set_tempo(&mut self, new_tempo: f32) {
+       self.tempo = new_tempo;
+    }
+    fn render(&mut self, context: &mut Context) {
+        let clock_s = self.clock_cons.raw_frames() as f32 / context.audio_sample_rate();
+        let beat = self.clock_cons.beat();
+        let sixteenth = beat * 4.;
+        let trigger_duration = 0.01; // 10ms
+        let integer_sixteenth = sixteenth as usize;
+        let analog_frames = context.analog_frames();
+        let analog_channels = context.analog_out_channels();
+        let audio_frames = context.audio_frames();
+        let analog_out = context.analog_out();
+
+        for frame in 0..analog_frames {
+            for i in 0..self.tracks.len() {
+                let s = self.tracks[i].steps();
+                let pos_in_pattern = integer_sixteenth % s.len();
+                if s[pos_in_pattern] != 0 && sixteenth.fract() < trigger_duration {
+                    analog_out[frame * analog_channels + i] = 1.0;
+                } else {
+                    analog_out[frame * analog_channels + i] = 0.0;
+                }
+            }
+        }
+
+        self.clock_up.increment(audio_frames);
+    }
+}
+
 
 struct Sequencer {
   tempo: f32,
@@ -27,14 +79,13 @@ struct Sequencer {
   height: usize,
   tracks: Vec<TrackControl>,
   sender: Sender<Message>,
-  audio_clock: ClockConsumer,
-  last_update: usize
+  audio_clock: ClockConsumer
 }
 
 impl Sequencer {
     fn new(width: usize, height: usize, sender: Sender<Message>, audio_clock: ClockConsumer) -> Sequencer {
         let mut tracks = Vec::<TrackControl>::new();
-        for i in 0..height {
+        for _ in 0..height {
           let t = TrackControl::new(width);
           tracks.push(t);
         }
@@ -45,7 +96,6 @@ impl Sequencer {
             tracks,
             sender,
             audio_clock,
-            last_update: 0
         }
     }
 
@@ -55,7 +105,6 @@ impl Sequencer {
     }
 
     fn press(&mut self, x: usize, y: usize) {
-      println!("keydown {} {}", x, y);
       self.tracks[y].press(x);
       self.sender.send(Message::Key((x,y)));
     }
@@ -69,10 +118,8 @@ impl Sequencer {
           grid[i * self.width + pos_in_pattern] = 4;
       }
 
-      println!("========");
       // draw pattern
       for i in 0..self.height {
-          println!("{:?}", self.tracks[i]);
           let steps = self.tracks[i].steps();
           for j in 0..self.width {
               if steps[j] != 0 {
@@ -122,22 +169,37 @@ fn go() -> Result<(), error::Error> {
 
     // Generates a non-bandlimited sawtooth at 110Hz.
     let mut render = |context: &mut Context, renderer: &mut Renderer| {
-        renderer.clock.increment(context.audio_frames());
-        for (_, samp) in context.audio_out().iter_mut().enumerate() {
-            let gain = 0.1;
-            *samp = 2. * (renderer.idx as f32 * 110. / 44100.) - 1.;
-            *samp *= gain;
-            renderer.idx += 1;
-            if renderer.idx as f32 > 44100. / 110. {
-                renderer.idx = 0;
+        match renderer.receiver.try_recv() {
+            Ok(msg) => {
+                match msg {
+                    Message::Key((x,y)) => {
+                        renderer.press(x, y);
+                    }
+                    Message::Start => {
+                    }
+                    Message::Stop=> {
+                    }
+                    Message::TempoChange(tempo)=> {
+                        renderer.set_tempo(tempo);
+                    }
+                }
+            }
+            Err(err) => {
+                match err {
+                    std::sync::mpsc::TryRecvError::Empty => {
+                    }
+                    std::sync::mpsc::TryRecvError::Disconnected => {
+                        println!("disconnected");
+                    }
+                }
             }
         }
+        renderer.render(context);
     };
 
-    let renderer = Renderer {
-        clock: clock_updater,
-        idx: 0
-    };
+    let (sender, receiver) = channel::<Message>();
+
+    let renderer = Renderer::new(16, 8, clock_updater, clock_consumer.clone(), receiver);
 
     let mut monome = Monome::new("/prefix".to_string()).unwrap();
     let user_data = AppData::new(renderer, &mut render, Some(&mut setup), Some(&mut cleanup));
@@ -146,11 +208,6 @@ fn go() -> Result<(), error::Error> {
     bela_app.init_audio(&mut settings)?;
     bela_app.start_audio()?;
 
-    let mut x = 0;
-    let mut y = 0;
-    let mut i = 1;
-
-    let (sender, receiver) = channel::<Message>();
     let mut seq = Sequencer::new(16, 8, sender, clock_consumer);
     seq.set_tempo(tempo);
 
@@ -178,7 +235,6 @@ fn go() -> Result<(), error::Error> {
         }
         seq.update(&mut grid);
 
-        println!("{:?}", grid);
         monome.set_all_intensity(&grid);
 
         let refresh = time::Duration::from_millis(33);

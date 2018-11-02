@@ -1,19 +1,19 @@
+extern crate audio_clock;
 extern crate bela;
 extern crate monome;
-extern crate audio_clock;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{thread, time};
-use std::sync::mpsc::{channel, Sender, Receiver};
 
+use audio_clock::*;
 use bela::*;
 use monome::*;
-use audio_clock::*;
 
 #[derive(Debug)]
 enum Message {
     Key((usize, usize)),
     Start,
     Stop,
-    TempoChange(f32)
+    TempoChange(f32),
 }
 
 pub struct MDSRenderer {
@@ -21,11 +21,17 @@ pub struct MDSRenderer {
     clock_cons: ClockConsumer,
     receiver: Receiver<Message>,
     tracks: Vec<TrackControl>,
-    tempo: f32
+    tempo: f32,
 }
 
 impl MDSRenderer {
-    fn new(width: usize, height: usize, clock_updater: ClockUpdater, clock_consumer: ClockConsumer, receiver: Receiver<Message>) -> MDSRenderer {
+    fn new(
+        width: usize,
+        height: usize,
+        clock_updater: ClockUpdater,
+        clock_consumer: ClockConsumer,
+        receiver: Receiver<Message>,
+    ) -> MDSRenderer {
         let mut tracks = Vec::<TrackControl>::new();
         for _ in 0..height {
             let t = TrackControl::new(width);
@@ -36,40 +42,33 @@ impl MDSRenderer {
             clock_up: clock_updater,
             clock_cons: clock_consumer,
             tracks,
-            tempo: 0.
+            tempo: 0.,
         }
     }
     fn press(&mut self, x: usize, y: usize) {
-       self.tracks[y].press(x);
+        self.tracks[y].press(x);
     }
     fn set_tempo(&mut self, new_tempo: f32) {
-       self.tempo = new_tempo;
+        self.tempo = new_tempo;
     }
     pub fn render(&mut self, context: &mut Context) {
         match self.receiver.try_recv() {
-            Ok(msg) => {
-                match msg {
-                    Message::Key((x,y)) => {
-                        self.press(x, y);
-                    }
-                    Message::Start => {
-                    }
-                    Message::Stop=> {
-                    }
-                    Message::TempoChange(tempo)=> {
-                        self.set_tempo(tempo);
-                    }
+            Ok(msg) => match msg {
+                Message::Key((x, y)) => {
+                    self.press(x, y);
                 }
-            }
-            Err(err) => {
-                match err {
-                    std::sync::mpsc::TryRecvError::Empty => {
-                    }
-                    std::sync::mpsc::TryRecvError::Disconnected => {
-                        println!("disconnected");
-                    }
+                Message::Start => {}
+                Message::Stop => {}
+                Message::TempoChange(tempo) => {
+                    self.set_tempo(tempo);
                 }
-            }
+            },
+            Err(err) => match err {
+                std::sync::mpsc::TryRecvError::Empty => {}
+                std::sync::mpsc::TryRecvError::Disconnected => {
+                    println!("disconnected");
+                }
+            },
         }
 
         let beat = self.clock_cons.beat();
@@ -98,14 +97,14 @@ impl MDSRenderer {
 }
 
 pub struct MDS {
-  tempo: f32,
-  width: usize,
-  height: usize,
-  tracks: Vec<TrackControl>,
-  sender: Sender<Message>,
-  audio_clock: ClockConsumer,
-  monome: Monome,
-  grid: Vec<u8>
+    tempo: f32,
+    width: usize,
+    height: usize,
+    tracks: Vec<TrackControl>,
+    sender: Sender<Message>,
+    audio_clock: ClockConsumer,
+    monome: Monome,
+    grid: Vec<u8>,
 }
 
 impl MDS {
@@ -118,31 +117,34 @@ impl MDS {
 
         let mut tracks = Vec::<TrackControl>::new();
         for _ in 0..height {
-          let t = TrackControl::new(width);
-          tracks.push(t);
+            let t = TrackControl::new(width);
+            tracks.push(t);
         }
         let monome = Monome::new("/prefix".to_string()).unwrap();
         let grid = vec![0 as u8; 128];
-        (MDS {
-            tempo: 120.,
-            width,
-            height,
-            tracks,
-            sender,
-            audio_clock: clock_consumer,
-            monome,
-            grid
-        }, renderer)
+        (
+            MDS {
+                tempo: 120.,
+                width,
+                height,
+                tracks,
+                sender,
+                audio_clock: clock_consumer,
+                monome,
+                grid,
+            },
+            renderer,
+        )
     }
 
     pub fn set_tempo(&mut self, new_tempo: f32) {
-       self.tempo = new_tempo;
-       self.sender.send(Message::TempoChange(new_tempo));
+        self.tempo = new_tempo;
+        self.sender.send(Message::TempoChange(new_tempo));
     }
 
     fn press(&mut self, x: usize, y: usize) {
-      self.tracks[y].press(x);
-      self.sender.send(Message::Key((x,y)));
+        self.tracks[y].press(x);
+        self.sender.send(Message::Key((x, y)));
     }
     pub fn render(&mut self) {
         let now = self.audio_clock.beat();
@@ -172,11 +174,11 @@ impl MDS {
     }
     pub fn poll_input(&mut self) {
         match self.monome.poll() {
-            Some(MonomeEvent::GridKey{x, y, direction}) => {
+            Some(MonomeEvent::GridKey { x, y, direction }) => {
                 match direction {
                     KeyDirection::Down => {
                         // self.state_tracker.down(x as usize, y as usize);
-                    },
+                    }
                     KeyDirection::Up => {
                         self.press(x as usize, y as usize);
                     }
@@ -195,13 +197,13 @@ impl MDS {
 // main thread
 #[derive(Debug)]
 struct TrackControl {
-  steps: Vec<u8>,
+    steps: Vec<u8>,
 }
 
 impl TrackControl {
     fn new(steps: usize) -> TrackControl {
         TrackControl {
-            steps: vec![0; steps]
+            steps: vec![0; steps],
         }
     }
     fn press(&mut self, x: usize) {

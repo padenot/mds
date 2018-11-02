@@ -1,16 +1,17 @@
-extern crate mds;
 extern crate bela;
-use mds::*;
+extern crate mds;
 use bela::*;
+use mds::*;
 use std::{thread, time};
 
 fn main() {
     let tempo = 128.0;
 
-    let mut setup = |_context: &mut Context, _user_data: &mut MDSRenderer| -> Result<(), error::Error> {
-        println!("Setting up");
-        Ok(())
-    };
+    let mut setup =
+        |_context: &mut Context, _user_data: &mut MDSRenderer| -> Result<(), error::Error> {
+            println!("Setting up");
+            Ok(())
+        };
 
     let mut cleanup = |_context: &mut Context, _user_data: &mut MDSRenderer| {
         println!("Cleaning up");
@@ -28,7 +29,6 @@ fn main() {
     let mut settings = InitSettings::default();
     bela_app.init_audio(&mut settings);
     bela_app.start_audio();
-
 
     while !bela_app.should_stop() {
         seq.main_thread_work();

@@ -1,7 +1,8 @@
-# `monome-bela-seq`
+# `mds`
 
-Early stage of the code intended to run on a [bela](https://bela.io), to control
-a modular (eurorack) synth from a [monome grid](https://monome.org/docs/grid/).
+Code intended to run on a [bela](https://bela.io), to sequence drums and other
+things that can receive gates. Sequencing is done on a [monome
+grid](https://monome.org/docs/grid/).
 
 # License
 

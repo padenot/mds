@@ -16,7 +16,7 @@ enum Message {
     TempoChange(f32)
 }
 
-pub struct Renderer {
+pub struct MDSRenderer {
     clock_up: ClockUpdater,
     clock_cons: ClockConsumer,
     receiver: Receiver<Message>,
@@ -24,14 +24,14 @@ pub struct Renderer {
     tempo: f32
 }
 
-impl Renderer {
-    fn new(width: usize, height: usize, clock_updater: ClockUpdater, clock_consumer: ClockConsumer, receiver: Receiver<Message>) -> Renderer {
+impl MDSRenderer {
+    fn new(width: usize, height: usize, clock_updater: ClockUpdater, clock_consumer: ClockConsumer, receiver: Receiver<Message>) -> MDSRenderer {
         let mut tracks = Vec::<TrackControl>::new();
         for _ in 0..height {
             let t = TrackControl::new(width);
             tracks.push(t);
         }
-        Renderer {
+        MDSRenderer {
             receiver,
             clock_up: clock_updater,
             clock_cons: clock_consumer,
@@ -97,7 +97,7 @@ impl Renderer {
     }
 }
 
-pub struct Sequencer {
+pub struct MDS {
   tempo: f32,
   width: usize,
   height: usize,
@@ -108,13 +108,13 @@ pub struct Sequencer {
   grid: Vec<u8>
 }
 
-impl Sequencer {
-    pub fn new(width: usize, height: usize, tempo: f32) -> (Sequencer, Renderer) {
+impl MDS {
+    pub fn new(width: usize, height: usize, tempo: f32) -> (MDS, MDSRenderer) {
         let (sender, receiver) = channel::<Message>();
 
         let (clock_updater, clock_consumer) = audio_clock(tempo, 44100);
 
-        let renderer = Renderer::new(16, 8, clock_updater, clock_consumer.clone(), receiver);
+        let renderer = MDSRenderer::new(16, 8, clock_updater, clock_consumer.clone(), receiver);
 
         let mut tracks = Vec::<TrackControl>::new();
         for _ in 0..height {
@@ -123,7 +123,7 @@ impl Sequencer {
         }
         let monome = Monome::new("/prefix".to_string()).unwrap();
         let grid = vec![0 as u8; 128];
-        (Sequencer {
+        (MDS {
             tempo: 120.,
             width,
             height,

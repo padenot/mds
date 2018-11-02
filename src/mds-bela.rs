@@ -7,20 +7,20 @@ use std::{thread, time};
 fn main() {
     let tempo = 128.0;
 
-    let mut setup = |_context: &mut Context, _user_data: &mut Renderer| -> Result<(), error::Error> {
+    let mut setup = |_context: &mut Context, _user_data: &mut MDSRenderer| -> Result<(), error::Error> {
         println!("Setting up");
         Ok(())
     };
 
-    let mut cleanup = |_context: &mut Context, _user_data: &mut Renderer| {
+    let mut cleanup = |_context: &mut Context, _user_data: &mut MDSRenderer| {
         println!("Cleaning up");
     };
 
-    let mut render = |context: &mut Context, renderer: &mut Renderer| {
+    let mut render = |context: &mut Context, renderer: &mut MDSRenderer| {
         renderer.render(context);
     };
 
-    let (mut seq, renderer) = Sequencer::new(16, 8, tempo);
+    let (mut seq, renderer) = MDS::new(16, 8, tempo);
     seq.set_tempo(tempo);
 
     let user_data = AppData::new(renderer, &mut render, Some(&mut setup), Some(&mut cleanup));

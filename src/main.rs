@@ -46,7 +46,32 @@ impl Renderer {
        self.tempo = new_tempo;
     }
     fn render(&mut self, context: &mut Context) {
-        let clock_s = self.clock_cons.raw_frames() as f32 / context.audio_sample_rate();
+        match self.receiver.try_recv() {
+            Ok(msg) => {
+                match msg {
+                    Message::Key((x,y)) => {
+                        self.press(x, y);
+                    }
+                    Message::Start => {
+                    }
+                    Message::Stop=> {
+                    }
+                    Message::TempoChange(tempo)=> {
+                        self.set_tempo(tempo);
+                    }
+                }
+            }
+            Err(err) => {
+                match err {
+                    std::sync::mpsc::TryRecvError::Empty => {
+                    }
+                    std::sync::mpsc::TryRecvError::Disconnected => {
+                        println!("disconnected");
+                    }
+                }
+            }
+        }
+
         let beat = self.clock_cons.beat();
         let sixteenth = beat * 4.;
         let trigger_duration = 0.01; // 10ms
@@ -72,14 +97,15 @@ impl Renderer {
     }
 }
 
-
 struct Sequencer {
   tempo: f32,
   width: usize,
   height: usize,
   tracks: Vec<TrackControl>,
   sender: Sender<Message>,
-  audio_clock: ClockConsumer
+  audio_clock: ClockConsumer,
+  monome: Monome,
+  grid: Vec<u8>
 }
 
 impl Sequencer {
@@ -89,6 +115,8 @@ impl Sequencer {
           let t = TrackControl::new(width);
           tracks.push(t);
         }
+        let monome = Monome::new("/prefix".to_string()).unwrap();
+        let grid = vec![0 as u8; 128];
         Sequencer {
             tempo: 120.,
             width,
@@ -96,6 +124,8 @@ impl Sequencer {
             tracks,
             sender,
             audio_clock,
+            monome,
+            grid,
         }
     }
 
@@ -108,25 +138,51 @@ impl Sequencer {
       self.tracks[y].press(x);
       self.sender.send(Message::Key((x,y)));
     }
-    fn update(&mut self, grid: &mut Vec<u8>) {
-      let now = self.audio_clock.beat();
-      let sixteenth = now * 4.;
-      let pos_in_pattern = (sixteenth as usize) % self.width;
+    fn render(&mut self) {
+        let now = self.audio_clock.beat();
+        let sixteenth = now * 4.;
+        let pos_in_pattern = (sixteenth as usize) % self.width;
 
-      // draw playhead
-      for i in 0..self.height {
-          grid[i * self.width + pos_in_pattern] = 4;
-      }
+        self.grid.iter_mut().map(|x| *x = 0).count();
 
-      // draw pattern
-      for i in 0..self.height {
-          let steps = self.tracks[i].steps();
-          for j in 0..self.width {
-              if steps[j] != 0 {
-                  grid[i * self.width + j] = 15;
-              }
-          }
-      }
+        // draw playhead
+        for i in 0..self.height {
+            self.grid[i * self.width + pos_in_pattern] = 4;
+        }
+
+        // draw pattern
+        for i in 0..self.height {
+            let steps = self.tracks[i].steps();
+            for j in 0..self.width {
+                if steps[j] != 0 {
+                    self.grid[i * self.width + j] = 15;
+                }
+            }
+        }
+        self.monome.set_all_intensity(&self.grid);
+    }
+    fn main_thread_work(&self) {
+        // noop
+    }
+    fn poll_input(&mut self) {
+        match self.monome.poll() {
+            Some(MonomeEvent::GridKey{x, y, direction}) => {
+                match direction {
+                    KeyDirection::Down => {
+                        // self.state_tracker.down(x as usize, y as usize);
+                    },
+                    KeyDirection::Up => {
+                        self.press(x as usize, y as usize);
+                    }
+                }
+            }
+            Some(_) => {
+                // break;
+            }
+            None => {
+                // break;
+            }
+        }
     }
 }
 
@@ -154,7 +210,11 @@ impl TrackControl {
     }
 }
 
+
 fn go() -> Result<(), error::Error> {
+    let tempo = 128.0;
+    let (clock_updater, clock_consumer) = audio_clock(tempo, 44100);
+
     let mut setup = |_context: &mut Context, _user_data: &mut Renderer| -> Result<(), error::Error> {
         println!("Setting up");
         Ok(())
@@ -164,36 +224,7 @@ fn go() -> Result<(), error::Error> {
         println!("Cleaning up");
     };
 
-    let tempo = 128.0;
-    let (clock_updater, clock_consumer) = audio_clock(tempo, 44100);
-
-    // Generates a non-bandlimited sawtooth at 110Hz.
     let mut render = |context: &mut Context, renderer: &mut Renderer| {
-        match renderer.receiver.try_recv() {
-            Ok(msg) => {
-                match msg {
-                    Message::Key((x,y)) => {
-                        renderer.press(x, y);
-                    }
-                    Message::Start => {
-                    }
-                    Message::Stop=> {
-                    }
-                    Message::TempoChange(tempo)=> {
-                        renderer.set_tempo(tempo);
-                    }
-                }
-            }
-            Err(err) => {
-                match err {
-                    std::sync::mpsc::TryRecvError::Empty => {
-                    }
-                    std::sync::mpsc::TryRecvError::Disconnected => {
-                        println!("disconnected");
-                    }
-                }
-            }
-        }
         renderer.render(context);
     };
 
@@ -201,7 +232,6 @@ fn go() -> Result<(), error::Error> {
 
     let renderer = Renderer::new(16, 8, clock_updater, clock_consumer.clone(), receiver);
 
-    let mut monome = Monome::new("/prefix".to_string()).unwrap();
     let user_data = AppData::new(renderer, &mut render, Some(&mut setup), Some(&mut cleanup));
     let mut bela_app = Bela::new(user_data);
     let mut settings = InitSettings::default();
@@ -211,31 +241,10 @@ fn go() -> Result<(), error::Error> {
     let mut seq = Sequencer::new(16, 8, sender, clock_consumer);
     seq.set_tempo(tempo);
 
-    let mut grid = vec![0 as u8; 128];
-
     while !bela_app.should_stop() {
-        grid.iter_mut().map(|x| *x = 0).count();
-        match monome.poll() {
-            Some(MonomeEvent::GridKey{x, y, direction}) => {
-                match direction {
-                    KeyDirection::Down => {
-                       // self.state_tracker.down(x as usize, y as usize);
-                    },
-                    KeyDirection::Up => {
-                        seq.press(x as usize, y as usize);
-                    }
-                }
-            }
-            Some(_) => {
-                // break;
-            }
-            None => {
-                // break;
-            }
-        }
-        seq.update(&mut grid);
-
-        monome.set_all_intensity(&grid);
+        seq.main_thread_work();
+        seq.poll_input();
+        seq.render();
 
         let refresh = time::Duration::from_millis(33);
         thread::sleep(refresh);

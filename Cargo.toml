@@ -1,7 +1,15 @@
 [package]
-name = "monome-bela-seq"
+name = "mds"
 version = "0.1.0"
 authors = ["Paul Adenot <paul@paul.cx>"]
+
+[lib]
+name = "mds"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mds-bela"
+path = "src/mds-bela.rs"
 
 [dependencies]
 monome-rs = "0.1.2"

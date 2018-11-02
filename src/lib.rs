@@ -16,7 +16,7 @@ enum Message {
     TempoChange(f32)
 }
 
-struct Renderer {
+pub struct Renderer {
     clock_up: ClockUpdater,
     clock_cons: ClockConsumer,
     receiver: Receiver<Message>,
@@ -45,7 +45,7 @@ impl Renderer {
     fn set_tempo(&mut self, new_tempo: f32) {
        self.tempo = new_tempo;
     }
-    fn render(&mut self, context: &mut Context) {
+    pub fn render(&mut self, context: &mut Context) {
         match self.receiver.try_recv() {
             Ok(msg) => {
                 match msg {
@@ -97,7 +97,7 @@ impl Renderer {
     }
 }
 
-struct Sequencer {
+pub struct Sequencer {
   tempo: f32,
   width: usize,
   height: usize,
@@ -109,7 +109,13 @@ struct Sequencer {
 }
 
 impl Sequencer {
-    fn new(width: usize, height: usize, sender: Sender<Message>, audio_clock: ClockConsumer) -> Sequencer {
+    pub fn new(width: usize, height: usize, tempo: f32) -> (Sequencer, Renderer) {
+        let (sender, receiver) = channel::<Message>();
+
+        let (clock_updater, clock_consumer) = audio_clock(tempo, 44100);
+
+        let renderer = Renderer::new(16, 8, clock_updater, clock_consumer.clone(), receiver);
+
         let mut tracks = Vec::<TrackControl>::new();
         for _ in 0..height {
           let t = TrackControl::new(width);
@@ -117,19 +123,19 @@ impl Sequencer {
         }
         let monome = Monome::new("/prefix".to_string()).unwrap();
         let grid = vec![0 as u8; 128];
-        Sequencer {
+        (Sequencer {
             tempo: 120.,
             width,
             height,
             tracks,
             sender,
-            audio_clock,
+            audio_clock: clock_consumer,
             monome,
-            grid,
-        }
+            grid
+        }, renderer)
     }
 
-    fn set_tempo(&mut self, new_tempo: f32) {
+    pub fn set_tempo(&mut self, new_tempo: f32) {
        self.tempo = new_tempo;
        self.sender.send(Message::TempoChange(new_tempo));
     }
@@ -138,7 +144,7 @@ impl Sequencer {
       self.tracks[y].press(x);
       self.sender.send(Message::Key((x,y)));
     }
-    fn render(&mut self) {
+    pub fn render(&mut self) {
         let now = self.audio_clock.beat();
         let sixteenth = now * 4.;
         let pos_in_pattern = (sixteenth as usize) % self.width;
@@ -161,10 +167,10 @@ impl Sequencer {
         }
         self.monome.set_all_intensity(&self.grid);
     }
-    fn main_thread_work(&self) {
+    pub fn main_thread_work(&self) {
         // noop
     }
-    fn poll_input(&mut self) {
+    pub fn poll_input(&mut self) {
         match self.monome.poll() {
             Some(MonomeEvent::GridKey{x, y, direction}) => {
                 match direction {
@@ -208,52 +214,4 @@ impl TrackControl {
     fn steps(&self) -> &[u8] {
         &self.steps
     }
-}
-
-
-fn go() -> Result<(), error::Error> {
-    let tempo = 128.0;
-    let (clock_updater, clock_consumer) = audio_clock(tempo, 44100);
-
-    let mut setup = |_context: &mut Context, _user_data: &mut Renderer| -> Result<(), error::Error> {
-        println!("Setting up");
-        Ok(())
-    };
-
-    let mut cleanup = |_context: &mut Context, _user_data: &mut Renderer| {
-        println!("Cleaning up");
-    };
-
-    let mut render = |context: &mut Context, renderer: &mut Renderer| {
-        renderer.render(context);
-    };
-
-    let (sender, receiver) = channel::<Message>();
-
-    let renderer = Renderer::new(16, 8, clock_updater, clock_consumer.clone(), receiver);
-
-    let user_data = AppData::new(renderer, &mut render, Some(&mut setup), Some(&mut cleanup));
-    let mut bela_app = Bela::new(user_data);
-    let mut settings = InitSettings::default();
-    bela_app.init_audio(&mut settings)?;
-    bela_app.start_audio()?;
-
-    let mut seq = Sequencer::new(16, 8, sender, clock_consumer);
-    seq.set_tempo(tempo);
-
-    while !bela_app.should_stop() {
-        seq.main_thread_work();
-        seq.poll_input();
-        seq.render();
-
-        let refresh = time::Duration::from_millis(33);
-        thread::sleep(refresh);
-    }
-    bela_app.stop_audio();
-    bela_app.cleanup_audio();
-    Ok(())
-}
-
-fn main() {
-    go().unwrap();
 }

@@ -17,3 +17,6 @@ audio-clock = "0.2.0"
 
 [dependencies.bela]
 path = "../bela-rs/"
+
+[dependencies.mbms-traits]
+path ="../mbms-traits/"

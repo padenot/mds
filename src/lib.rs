@@ -1,12 +1,15 @@
 extern crate audio_clock;
 extern crate bela;
 extern crate monome;
+extern crate mbms_traits;
+
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{thread, time};
 
 use audio_clock::*;
 use bela::*;
 use monome::{MonomeEvent, KeyDirection};
+use mbms_traits::{InstrumentRenderer, InstrumentControl};
 
 #[derive(Debug)]
 enum Message {
@@ -51,7 +54,10 @@ impl MDSRenderer {
     fn set_tempo(&mut self, new_tempo: f32) {
         self.tempo = new_tempo;
     }
-    pub fn render(&mut self, context: &mut Context) {
+}
+
+impl InstrumentRenderer for MDSRenderer {
+    fn render(&mut self, context: &mut Context) {
         match self.receiver.try_recv() {
             Ok(msg) => match msg {
                 Message::Key((x, y)) => {
@@ -143,7 +149,10 @@ impl MDS {
         self.tracks[y].press(x);
         self.sender.send(Message::Key((x, y)));
     }
-    pub fn render(&mut self, grid: &mut [u8]) {
+}
+
+impl InstrumentControl for MDS {
+    fn render(&mut self, grid: &mut [u8; 128]) {
         let now = self.audio_clock.beat();
         let sixteenth = now * 4.;
         let pos_in_pattern = (sixteenth as usize) % self.width;
@@ -165,10 +174,10 @@ impl MDS {
             }
         }
     }
-    pub fn main_thread_work(&self) {
+    fn main_thread_work(&mut self) {
         // noop
     }
-    pub fn input(&mut self, event: MonomeEvent) {
+    fn input(&mut self, event: MonomeEvent) {
         match event {
             MonomeEvent::GridKey { x, y, direction } => {
                 match direction {

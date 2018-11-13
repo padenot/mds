@@ -156,11 +156,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mbms-traits"
+version = "0.1.0"
+dependencies = [
+ "bela 0.1.0",
+ "monome-rs 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "mds"
 version = "0.1.0"
 dependencies = [
  "audio-clock 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bela 0.1.0",
+ "mbms-traits 0.1.0",
  "monome-rs 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

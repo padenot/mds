@@ -1,10 +1,12 @@
 extern crate bela;
 extern crate mds;
 extern crate monome;
+extern crate mbms_traits;
 
 use bela::*;
 use mds::*;
 use monome::*;
+use mbms_traits::*;
 use std::{thread, time};
 
 fn main() {
@@ -35,7 +37,7 @@ fn main() {
     let mut settings = InitSettings::default();
     bela_app.init_audio(&mut settings);
     bela_app.start_audio();
-    let mut grid = vec![0 as u8; 128];
+    let mut grid = [0 as u8; 128];
 
     while !bela_app.should_stop() {
         let event = monome.poll();
@@ -50,7 +52,9 @@ fn main() {
         seq.main_thread_work();
         seq.render(&mut grid);
 
-        monome.set_all_intensity(&grid);
+        monome.set_all_intensity(&grid.to_vec());
+
+        grid.iter_mut().map(|x| *x = 0).count();
 
         let refresh = time::Duration::from_millis(33);
         thread::sleep(refresh);

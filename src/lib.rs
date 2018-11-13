@@ -6,7 +6,7 @@ use std::{thread, time};
 
 use audio_clock::*;
 use bela::*;
-use monome::*;
+use monome::{MonomeEvent, KeyDirection};
 
 #[derive(Debug)]
 enum Message {
@@ -103,7 +103,6 @@ pub struct MDS {
     tracks: Vec<TrackControl>,
     sender: Sender<Message>,
     audio_clock: ClockConsumer,
-    monome: Monome,
     grid: Vec<u8>,
 }
 
@@ -120,7 +119,6 @@ impl MDS {
             let t = TrackControl::new(width);
             tracks.push(t);
         }
-        let monome = Monome::new("/prefix".to_string()).unwrap();
         let grid = vec![0 as u8; 128];
         (
             MDS {
@@ -130,7 +128,6 @@ impl MDS {
                 tracks,
                 sender,
                 audio_clock: clock_consumer,
-                monome,
                 grid,
             },
             renderer,
@@ -146,16 +143,16 @@ impl MDS {
         self.tracks[y].press(x);
         self.sender.send(Message::Key((x, y)));
     }
-    pub fn render(&mut self) {
+    pub fn render(&mut self, grid: &mut [u8]) {
         let now = self.audio_clock.beat();
         let sixteenth = now * 4.;
         let pos_in_pattern = (sixteenth as usize) % self.width;
 
-        self.grid.iter_mut().map(|x| *x = 0).count();
+        grid.iter_mut().map(|x| *x = 0).count();
 
         // draw playhead
         for i in 0..self.height {
-            self.grid[i * self.width + pos_in_pattern] = 4;
+            grid[i * self.width + pos_in_pattern] = 4;
         }
 
         // draw pattern
@@ -163,18 +160,17 @@ impl MDS {
             let steps = self.tracks[i].steps();
             for j in 0..self.width {
                 if steps[j] != 0 {
-                    self.grid[i * self.width + j] = 15;
+                    grid[i * self.width + j] = 15;
                 }
             }
         }
-        self.monome.set_all_intensity(&self.grid);
     }
     pub fn main_thread_work(&self) {
         // noop
     }
-    pub fn poll_input(&mut self) {
-        match self.monome.poll() {
-            Some(MonomeEvent::GridKey { x, y, direction }) => {
+    pub fn input(&mut self, event: MonomeEvent) {
+        match event {
+            MonomeEvent::GridKey { x, y, direction } => {
                 match direction {
                     KeyDirection::Down => {
                         // self.state_tracker.down(x as usize, y as usize);
@@ -184,12 +180,7 @@ impl MDS {
                     }
                 }
             }
-            Some(_) => {
-                // break;
-            }
-            None => {
-                // break;
-            }
+            _ => {  }
         }
     }
 }

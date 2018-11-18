@@ -12,7 +12,7 @@ name = "mds-bela"
 path = "src/mds-bela.rs"
 
 [dependencies]
-monome-rs = "0.1.2"
+monome-rs = { path = "../monome-rs/" }
 audio-clock = "0.2.0"
 
 [dependencies.bela]

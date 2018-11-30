@@ -9,7 +9,7 @@ use std::{thread, time};
 use audio_clock::*;
 use bela::*;
 use monome::{MonomeEvent, KeyDirection};
-use mbms_traits::{InstrumentRenderer, InstrumentControl};
+use mbms_traits::*;
 
 #[derive(Debug)]
 enum Message {
@@ -25,6 +25,7 @@ pub struct MDSRenderer {
     receiver: Receiver<Message>,
     tracks: Vec<TrackControl>,
     tempo: f32,
+    port_range: (BelaPort, BelaPort)
 }
 
 impl MDSRenderer {
@@ -34,6 +35,7 @@ impl MDSRenderer {
         clock_updater: ClockUpdater,
         clock_consumer: ClockConsumer,
         receiver: Receiver<Message>,
+        port_range: (BelaPort, BelaPort)
     ) -> MDSRenderer {
         let mut tracks = Vec::<TrackControl>::new();
         for _ in 0..height {
@@ -46,6 +48,7 @@ impl MDSRenderer {
             clock_cons: clock_consumer,
             tracks,
             tempo: 0.,
+            port_range,
         }
     }
     fn press(&mut self, x: usize, y: usize) {
@@ -82,23 +85,42 @@ impl InstrumentRenderer for MDSRenderer {
         let trigger_duration = 0.01; // 10ms
         let integer_sixteenth = sixteenth as usize;
         let analog_frames = context.analog_frames();
-        let analog_channels = context.analog_out_channels();
-        let audio_frames = context.audio_frames();
-        let analog_out = context.analog_out();
 
-        for frame in 0..analog_frames {
-            for i in 0..self.tracks.len() {
-                let s = self.tracks[i].steps();
-                let pos_in_pattern = integer_sixteenth % s.len();
-                if s[pos_in_pattern] != 0 && sixteenth.fract() < trigger_duration {
-                    analog_out[frame * analog_channels + i] = 1.0;
-                } else {
-                    analog_out[frame * analog_channels + i] = 0.0;
+        match self.port_range {
+            (BelaPort::Digital(start), BelaPort::Digital(end)) => {
+                let digital_frames = context.digital_frames();
+                for frame in 0..digital_frames {
+                    for i in 0..self.tracks.len() {
+                        let s = self.tracks[i].steps();
+                        let pos_in_pattern = integer_sixteenth % s.len();
+                        if s[pos_in_pattern] != 0 && sixteenth.fract() < trigger_duration {
+                            assert!(start + i <= end);
+                            context.digital_write_once(frame, start + i, 1);
+                        } else {
+                            context.digital_write_once(frame, start + i, 0);
+                        }
+                    }
+                }
+            },
+            (BelaPort::AnalogOut(start), BelaPort::AnalogOut(end)) => {
+                let analog_channels = context.analog_out_channels();
+                let analog_out = context.analog_out();
+                for frame in 0..analog_frames {
+                    for i in 0..self.tracks.len() {
+                        let s = self.tracks[i].steps();
+                        let pos_in_pattern = integer_sixteenth % s.len();
+                        if s[pos_in_pattern] != 0 && sixteenth.fract() < trigger_duration {
+                            analog_out[frame * analog_channels + i + start] = 1.0;
+                        } else {
+                            analog_out[frame * analog_channels + i + start] = 0.0;
+                        }
+                    }
                 }
             }
+            _ => {
+                panic!("bad bad bad")
+            }
         }
-
-        self.clock_up.increment(audio_frames);
     }
 }
 
@@ -113,12 +135,26 @@ pub struct MDS {
 }
 
 impl MDS {
-    pub fn new(width: usize, height: usize, tempo: f32) -> (MDS, MDSRenderer) {
+    pub fn new(ports: (BelaPort, BelaPort), width: usize, height: usize, tempo: f32) -> (MDS, MDSRenderer) {
         let (sender, receiver) = channel::<Message>();
 
         let (clock_updater, clock_consumer) = audio_clock(tempo, 44100);
 
-        let renderer = MDSRenderer::new(16, 8, clock_updater, clock_consumer.clone(), receiver);
+        let portrange = match ports {
+            (BelaPort::Digital(start), BelaPort::Digital(end)) => {
+                if end - start != height {
+                    panic!("not enought output ports");
+                }
+            },
+            (BelaPort::AnalogOut(start), BelaPort::AnalogOut(end)) => {
+                if end - start != height {
+                    panic!("not enought output ports");
+                }
+            },
+            _ => { panic!("bad BelaPort for MDS"); }
+        };
+
+        let renderer = MDSRenderer::new(16, 8, clock_updater, clock_consumer.clone(), receiver, ports);
 
         let mut tracks = Vec::<TrackControl>::new();
         for _ in 0..height {
@@ -169,7 +205,7 @@ impl InstrumentControl for MDS {
             let steps = self.tracks[i].steps();
             for j in 0..self.width {
                 if steps[j] != 0 {
-                    grid[i * self.width + j] = 15;
+                    grid[1 + i * self.width + j] = 15;
                 }
             }
         }

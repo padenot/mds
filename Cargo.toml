@@ -13,10 +13,13 @@ path = "src/mds-bela.rs"
 
 [dependencies]
 monome-rs = { path = "../monome-rs/" }
+smallvec = "0.6.7"
 audio-clock = "0.2.0"
+euclidian-rythms = { path = "../euclidian-rythms"}
 
 [dependencies.bela]
 path = "../bela-rs/"
 
 [dependencies.mbms-traits]
 path ="../mbms-traits/"
+

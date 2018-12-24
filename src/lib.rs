@@ -1,20 +1,20 @@
 extern crate audio_clock;
 extern crate bela;
-extern crate monome;
-extern crate mbms_traits;
-extern crate smallvec;
 extern crate euclidian_rythms;
+extern crate mbms_traits;
+extern crate monome;
+extern crate smallvec;
 
+use std::cmp;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{thread, time};
-use std::cmp;
 
-use smallvec::SmallVec;
 use audio_clock::*;
 use bela::*;
-use monome::{MonomeEvent, KeyDirection};
-use mbms_traits::*;
 use euclidian_rythms::*;
+use mbms_traits::*;
+use monome::{KeyDirection, MonomeEvent};
+use smallvec::SmallVec;
 
 #[derive(Debug)]
 enum Message {
@@ -32,7 +32,7 @@ pub struct MDSRenderer {
     receiver: Receiver<Message>,
     tracks: Vec<TrackControl>,
     tempo: f32,
-    port_range: (BelaPort, BelaPort)
+    port_range: (BelaPort, BelaPort),
 }
 
 impl MDSRenderer {
@@ -42,7 +42,7 @@ impl MDSRenderer {
         clock_updater: ClockUpdater,
         clock_consumer: ClockConsumer,
         receiver: Receiver<Message>,
-        port_range: (BelaPort, BelaPort)
+        port_range: (BelaPort, BelaPort),
     ) -> MDSRenderer {
         let mut tracks = Vec::<TrackControl>::new();
         for _ in 0..height {
@@ -119,7 +119,7 @@ impl InstrumentRenderer for MDSRenderer {
                         }
                     }
                 }
-            },
+            }
             (BelaPort::AnalogOut(start), BelaPort::AnalogOut(end)) => {
                 let analog_channels = context.analog_out_channels();
                 let analog_out = context.analog_out();
@@ -135,9 +135,7 @@ impl InstrumentRenderer for MDSRenderer {
                     }
                 }
             }
-            _ => {
-                panic!("bad bad bad")
-            }
+            _ => panic!("bad bad bad"),
         }
         self.clock_updater.increment(frames);
     }
@@ -151,11 +149,16 @@ pub struct MDS {
     sender: Sender<Message>,
     audio_clock: ClockConsumer,
     grid: Vec<u8>,
-    state_tracker: GridStateTracker
+    state_tracker: GridStateTracker,
 }
 
 impl MDS {
-    pub fn new(ports: (BelaPort, BelaPort), width: usize, height: usize, tempo: f32) -> (MDS, MDSRenderer) {
+    pub fn new(
+        ports: (BelaPort, BelaPort),
+        width: usize,
+        height: usize,
+        tempo: f32,
+    ) -> (MDS, MDSRenderer) {
         let (sender, receiver) = channel::<Message>();
 
         let (clock_updater, clock_consumer) = audio_clock(tempo, 44100);
@@ -165,16 +168,25 @@ impl MDS {
                 if end - start != height {
                     panic!("not enought output ports");
                 }
-            },
+            }
             (BelaPort::AnalogOut(start), BelaPort::AnalogOut(end)) => {
                 if end - start != height {
                     panic!("not enought output ports");
                 }
-            },
-            _ => { panic!("bad BelaPort for MDS"); }
+            }
+            _ => {
+                panic!("bad BelaPort for MDS");
+            }
         };
 
-        let renderer = MDSRenderer::new(16, 8, clock_updater, clock_consumer.clone(), receiver, ports);
+        let renderer = MDSRenderer::new(
+            16,
+            8,
+            clock_updater,
+            clock_consumer.clone(),
+            receiver,
+            ports,
+        );
         let state_tracker = GridStateTracker::new(16, 8);
 
         let mut tracks = Vec::<TrackControl>::new();
@@ -192,7 +204,7 @@ impl MDS {
                 sender,
                 audio_clock: clock_consumer,
                 grid,
-                state_tracker
+                state_tracker,
             },
             renderer,
         )
@@ -222,7 +234,7 @@ enum MDSIntent {
     Nothing,
     Tick,
     Euclidian,
-    Loop
+    Loop,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -230,13 +242,13 @@ enum MDSAction {
     Nothing,
     Tick((usize, usize)),
     Euclidian((usize, usize, usize)),
-    Loop((usize, usize, usize))
+    Loop((usize, usize, usize)),
 }
 
 struct GridStateTracker {
-  buttons: Vec<MDSIntent>,
-  width: usize,
-  height: usize
+    buttons: Vec<MDSIntent>,
+    width: usize,
+    height: usize,
 }
 
 impl GridStateTracker {
@@ -244,7 +256,7 @@ impl GridStateTracker {
         GridStateTracker {
             width,
             height,
-            buttons: vec![MDSIntent::Nothing; width * height]
+            buttons: vec![MDSIntent::Nothing; width * height],
         }
     }
 
@@ -287,7 +299,7 @@ impl GridStateTracker {
                 MDSIntent::Nothing => {
                     // !? pressed a key during startup
                     MDSAction::Nothing
-                },
+                }
                 MDSIntent::Tick => {
                     self.buttons[Self::idx(self.width, x, y)] = MDSIntent::Nothing;
                     MDSAction::Tick((x, y - 1))
@@ -298,7 +310,9 @@ impl GridStateTracker {
                     // euclidian pattern command that is being released.
                     let mut other: Option<usize> = None;
                     for i in 0..self.width {
-                        if i != x && self.buttons[Self::idx(self.width, i, y)] == MDSIntent::Euclidian {
+                        if i != x
+                            && self.buttons[Self::idx(self.width, i, y)] == MDSIntent::Euclidian
+                        {
                             other = Some(i);
                         }
                     }
@@ -333,7 +347,7 @@ impl GridStateTracker {
                             let start = std::cmp::min(x, i);
                             let end = std::cmp::max(y, i);
                             MDSAction::Loop((y - 1, start, end))
-                        },
+                        }
                         None => MDSAction::Nothing,
                     }
                 }
@@ -355,7 +369,7 @@ impl InstrumentControl for MDS {
         grid.iter_mut().map(|x| *x = 0).count();
 
         // draw playhead
-        for i in 1..self.height+1 {
+        for i in 1..self.height + 1 {
             grid[i * self.width + pos_in_pattern] = 4;
         }
 
@@ -364,7 +378,7 @@ impl InstrumentControl for MDS {
             self.tracks[i].steps(now, &mut steps);
             for j in 0..self.width {
                 if steps[j] != 0 {
-                    grid[(1+i) * self.width + j] = 15;
+                    grid[(1 + i) * self.width + j] = 15;
                 }
             }
         }
@@ -380,24 +394,24 @@ impl InstrumentControl for MDS {
                         self.state_tracker.down(x as usize, y as usize);
                     }
                     KeyDirection::Up => {
-                       match self.state_tracker.up(x as usize, y as usize) {
-                           MDSAction::Nothing => {
-                               // nothing
-                           },
-                           MDSAction::Tick((x, track_idx)) => {
-                               self.press(x, track_idx);
-                           },
-                           MDSAction::Euclidian((track_idx, steps, pulses)) => {
-                               self.euclidian(track_idx, steps, pulses);
-                           },
-                           MDSAction::Loop((track_idx, start, end)) => {
-                               self.looop(track_idx, start, end);
-                           }
-                       }
+                        match self.state_tracker.up(x as usize, y as usize) {
+                            MDSAction::Nothing => {
+                                // nothing
+                            }
+                            MDSAction::Tick((x, track_idx)) => {
+                                self.press(x, track_idx);
+                            }
+                            MDSAction::Euclidian((track_idx, steps, pulses)) => {
+                                self.euclidian(track_idx, steps, pulses);
+                            }
+                            MDSAction::Loop((track_idx, start, end)) => {
+                                self.looop(track_idx, start, end);
+                            }
+                        }
                     }
                 }
             }
-            _ => {  }
+            _ => {}
         }
     }
 }
@@ -412,21 +426,19 @@ impl TrackControl {
     fn new(steps: usize) -> TrackControl {
         let mut steps = SmallVec::<[u8; 16]>::new();
         steps.resize(16, 0);
-        TrackControl {
-            steps
-        }
+        TrackControl { steps }
     }
     fn press(&mut self, x: usize) {
         // if press when in euclidian, freeze the euclidian pattern as if it was computed for time
         // 0 and add the press (activating or deactivating a step). It would be better to freeze
         // the current pattern.
         if self.steps.len() != 16 {
-          let mut current_steps = [0 as u8; 16];
-          self.steps(0., &mut current_steps);
-          self.steps.resize(16, 0);
-          for i in 0..16 {
-            self.steps[i] = current_steps[i];
-          }
+            let mut current_steps = [0 as u8; 16];
+            self.steps(0., &mut current_steps);
+            self.steps.resize(16, 0);
+            for i in 0..16 {
+                self.steps[i] = current_steps[i];
+            }
         }
         if self.steps[x] == 0 {
             self.steps[x] = 1;

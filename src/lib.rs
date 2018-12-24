@@ -27,8 +27,8 @@ enum Message {
 }
 
 pub struct MDSRenderer {
-    clock_up: ClockUpdater,
-    clock_cons: ClockConsumer,
+    clock_updater: ClockUpdater,
+    clock_consumer: ClockConsumer,
     receiver: Receiver<Message>,
     tracks: Vec<TrackControl>,
     tempo: f32,
@@ -51,18 +51,21 @@ impl MDSRenderer {
         }
         MDSRenderer {
             receiver,
-            clock_up: clock_updater,
-            clock_cons: clock_consumer,
+            clock_updater,
+            clock_consumer,
             tracks,
             tempo: 0.,
             port_range,
         }
     }
-    fn press(&mut self, x: usize, y: usize) {
-        self.tracks[y].press(x);
+    fn press(&mut self, x: usize, track_idx: usize) {
+        self.tracks[track_idx].press(x);
     }
     fn set_tempo(&mut self, new_tempo: f32) {
         self.tempo = new_tempo;
+    }
+    fn euclidian(&mut self, track_idx: usize, steps: usize, pulse: usize) {
+        self.tracks[track_idx].euclidian(steps, pulse);
     }
 }
 
@@ -70,16 +73,16 @@ impl InstrumentRenderer for MDSRenderer {
     fn render(&mut self, context: &mut Context) {
         match self.receiver.try_recv() {
             Ok(msg) => match msg {
-                Message::Key((x, y)) => {
-                    self.press(x, y);
+                Message::Key((x, track_idx)) => {
+                    self.press(x, track_idx);
                 }
                 Message::Start => {}
                 Message::Stop => {}
                 Message::TempoChange(tempo) => {
                     self.set_tempo(tempo);
                 }
-                Message::Euclidian((track, steps, pulses)) => {
-                    // ...
+                Message::Euclidian((track_idx, steps, pulses)) => {
+                    self.euclidian(track_idx, steps, pulses);
                 }
                 Message::Loop((track, start, end)) => {
                     // ...
@@ -93,7 +96,8 @@ impl InstrumentRenderer for MDSRenderer {
             },
         }
 
-        let beat = self.clock_cons.beat();
+        let frames = context.audio_frames();
+        let beat = self.clock_consumer.beat();
         let sixteenth = beat * 4.;
         let trigger_duration = 0.01; // 10ms
         let integer_sixteenth = sixteenth as usize;
@@ -135,6 +139,7 @@ impl InstrumentRenderer for MDSRenderer {
                 panic!("bad bad bad")
             }
         }
+        self.clock_updater.increment(frames);
     }
 }
 
@@ -198,9 +203,9 @@ impl MDS {
         self.sender.send(Message::TempoChange(new_tempo));
     }
 
-    fn press(&mut self, x: usize, y: usize) {
-        self.tracks[y].press(x);
-        self.sender.send(Message::Key((x, y)));
+    fn press(&mut self, x: usize, track_idx: usize) {
+        self.tracks[track_idx].press(x);
+        self.sender.send(Message::Key((x, track_idx)));
     }
     fn euclidian(&mut self, track: usize, steps: usize, pulses: usize) {
         self.tracks[track].euclidian(steps, pulses);
@@ -255,14 +260,17 @@ impl GridStateTracker {
             let mut foundanother = false;
             for i in 0..self.width {
                 if self.buttons[Self::idx(self.width, i, y)] != MDSIntent::Nothing {
-                    if i < y {
+                    if i < x {
                         self.buttons[Self::idx(self.width, i, y)] = MDSIntent::Euclidian;
                         self.buttons[Self::idx(self.width, x, y)] = MDSIntent::Euclidian;
+                        foundanother = true;
+                        break;
                     } else {
                         self.buttons[Self::idx(self.width, i, y)] = MDSIntent::Loop;
                         self.buttons[Self::idx(self.width, x, y)] = MDSIntent::Loop;
+                        foundanother = true;
+                        break;
                     }
-                    foundanother = true;
                 }
             }
             if !foundanother {
@@ -282,7 +290,7 @@ impl GridStateTracker {
                 },
                 MDSIntent::Tick => {
                     self.buttons[Self::idx(self.width, x, y)] = MDSIntent::Nothing;
-                    MDSAction::Tick((x, y))
+                    MDSAction::Tick((x, y - 1))
                 }
                 MDSIntent::Euclidian => {
                     // Find the other button that is down, if we find one that is also euclidian
@@ -302,7 +310,7 @@ impl GridStateTracker {
                         Some(i) => {
                             let pulses = std::cmp::min(x, i);
                             let steps = std::cmp::max(x, i);
-                            MDSAction::Euclidian((y, steps, pulses))
+                            MDSAction::Euclidian((y - 1, steps + 1, pulses + 1))
                         }
                         None => MDSAction::Nothing,
                     }
@@ -324,7 +332,7 @@ impl GridStateTracker {
                         Some(i) => {
                             let start = std::cmp::min(x, i);
                             let end = std::cmp::max(y, i);
-                            MDSAction::Loop((y, start, end))
+                            MDSAction::Loop((y - 1, start, end))
                         },
                         None => MDSAction::Nothing,
                     }
@@ -347,7 +355,7 @@ impl InstrumentControl for MDS {
         grid.iter_mut().map(|x| *x = 0).count();
 
         // draw playhead
-        for i in 0..self.height {
+        for i in 1..self.height+1 {
             grid[i * self.width + pos_in_pattern] = 4;
         }
 
@@ -356,7 +364,7 @@ impl InstrumentControl for MDS {
             self.tracks[i].steps(now, &mut steps);
             for j in 0..self.width {
                 if steps[j] != 0 {
-                    grid[1 + i * self.width + j] = 15;
+                    grid[(1+i) * self.width + j] = 15;
                 }
             }
         }
@@ -376,14 +384,14 @@ impl InstrumentControl for MDS {
                            MDSAction::Nothing => {
                                // nothing
                            },
-                           MDSAction::Tick((x, y)) => {
-                               self.press(x, y);
+                           MDSAction::Tick((x, track_idx)) => {
+                               self.press(x, track_idx);
                            },
-                           MDSAction::Euclidian((track, steps, pulses)) => {
-                               self.euclidian(track, steps, pulses);
+                           MDSAction::Euclidian((track_idx, steps, pulses)) => {
+                               self.euclidian(track_idx, steps, pulses);
                            },
-                           MDSAction::Loop((track, start, end)) => {
-                               self.looop(track, start, end);
+                           MDSAction::Loop((track_idx, start, end)) => {
+                               self.looop(track_idx, start, end);
                            }
                        }
                     }
@@ -397,16 +405,29 @@ impl InstrumentControl for MDS {
 // main thread
 #[derive(Debug)]
 struct TrackControl {
-    steps: SmallVec<[u8; 16]>
+    steps: SmallVec<[u8; 16]>,
 }
 
 impl TrackControl {
     fn new(steps: usize) -> TrackControl {
+        let mut steps = SmallVec::<[u8; 16]>::new();
+        steps.resize(16, 0);
         TrackControl {
-            steps: SmallVec::<[u8; 16]>::new()
+            steps
         }
     }
     fn press(&mut self, x: usize) {
+        // if press when in euclidian, freeze the euclidian pattern as if it was computed for time
+        // 0 and add the press (activating or deactivating a step). It would be better to freeze
+        // the current pattern.
+        if self.steps.len() != 16 {
+          let mut current_steps = [0 as u8; 16];
+          self.steps(0., &mut current_steps);
+          self.steps.resize(16, 0);
+          for i in 0..16 {
+            self.steps[i] = current_steps[i];
+          }
+        }
         if self.steps[x] == 0 {
             self.steps[x] = 1;
         } else {
@@ -422,9 +443,11 @@ impl TrackControl {
     fn looop(&mut self, start: usize, end: usize) {
         // ...
     }
-    fn steps(&self, beat: f32, steps: &mut [u8; 16]) {
+    fn steps(&mut self, beat: f32, steps: &mut [u8; 16]) {
+        let beat_rounded_bar = (beat as usize) / 4 * 4 * 4;
+        let offset = (beat_rounded_bar as usize) % self.steps.len();
         for i in 0..16 {
-            steps[i] = self.steps[i % self.steps.len()];
+            steps[i] = self.steps[(offset + i) % self.steps.len()];
         }
     }
 }

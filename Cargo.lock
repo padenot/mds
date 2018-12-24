@@ -179,6 +179,7 @@ dependencies = [
  "euclidian-rythms 0.1.0",
  "mbms-traits 0.1.0",
  "monome-rs 0.2.0",
+ "smallvec 0.6.7 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

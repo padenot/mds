@@ -26,7 +26,7 @@ fn main() {
         renderer.render(context);
     };
 
-    let (mut seq, renderer) = MDS::new(16, 8, tempo);
+    let (mut seq, renderer) = MDS::new((BelaPort::AnalogOut(0), BelaPort::AnalogOut(7)), 16, 7, 128.);
     seq.set_tempo(tempo);
 
 
